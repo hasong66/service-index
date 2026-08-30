@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <div class="bar-inner">
+      <div class="brand">
+        <span class="logo">▮▮▮</span>
+        <span class="title" id="app-title">{{ title }}</span>
+      </div>
+      <div class="search">
+        <input id="q" type="search" placeholder="搜索  名称 / 描述 / 域名 / 端口 …" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="btn-discover" title="端口发现">🔍</button>
+        <button class="btn ghost" id="btn-settings" title="修改密码">⚙</button>
+        <button class="btn ghost" id="btn-logout" title="退出登录">⎋</button>
+        <button class="btn primary" id="btn-add">＋ 添加服务</button>
+      </div>
+    </div>
+    <div class="subbar">
+      <div class="net-switch" id="net-switch"></div>
+      <div class="access" id="access-info"></div>
+    </div>
+  </header>
+
+  <!-- ============ 首次引导：先把网络定义出来 ============ -->
+  <section class="wrap wizard" id="wizard" hidden>
+    <div class="wiz-card">
+      <div class="wiz-logo">🧭</div>
+      <h1>先告诉我你的网络</h1>
+      <p class="wiz-lead" id="wiz-lead"></p>
+
+      <div id="wiz-rows"></div>
+
+      <div class="wiz-add">
+        <span>再加一个：</span>
+        <button class="chip" data-wiz-add="lan">🏠 内网</button>
+        <button class="chip" data-wiz-add="mesh">🛰️ 组网 / VPN</button>
+        <button class="chip" data-wiz-add="public">🌐 公网域名</button>
+      </div>
+
+      <details class="wiz-help">
+        <summary>这几项分别是什么意思？</summary>
+        <ul>
+          <li><b>按端口访问</b>：内网、组网这种「同一台机器、靠端口区分服务」的场景。
+              服务地址 = 这里填的主机 + 服务自己的端口。</li>
+          <li><b>按域名访问</b>：公网穿透 / 反代，每个服务一个域名。
+              地址来自服务自己的 <span class="mono">domain</span> 字段，所以这里不填主机。</li>
+          <li><b>命中规则</b>：判断「此刻算哪个网络」。规则从上往下比，第一个命中的生效。
+              支持精确写法、<span class="mono">192.168.*</span> 这种前缀，
+              和 <span class="mono">*.example.com</span> 这种子域。</li>
+        </ul>
+        <p>都可以之后随时改，写错了不会有任何损失。</p>
+      </details>
+
+      <div class="form-err" id="wiz-err"></div>
+      <div class="wiz-foot">
+        <span class="wiz-count" id="wiz-count"></span>
+        <button class="btn primary" id="wiz-save">保存，开始添加服务</button>
+      </div>
+    </div>
+  </section>
+
+  <main class="wrap" id="main-view">
+    <div class="chips" id="chips"></div>
+    <div id="grid-root"></div>
+    <div class="empty" id="empty" hidden>
+      <div class="big">📭</div>
+      <p id="empty-title">还没有匹配的服务</p>
+      <p style="font-size:12px" id="empty-sub">点右上角「＋ 添加服务」，或修改搜索 / 筛选条件</p>
+    </div>
+  </main>
+
+  <!-- ============ 添加 / 编辑 服务 ============ -->
+  <div class="overlay" id="svc-overlay">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h3 id="svc-modal-title">添加服务</h3>
+        <button class="x" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="f-id">
+
+        <div class="field inline-2">
+          <div>
+            <label>名称 <span class="hint">*</span></label>
+            <input type="text" id="f-name" placeholder="如 Jellyfin">
+          </div>
+          <div>
+            <label>图标 <span class="hint">emoji，可空</span></label>
+            <input type="text" id="f-icon" class="mono" placeholder="🎬" maxlength="4">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>描述 <span class="hint">可空</span></label>
+          <input type="text" id="f-desc" placeholder="一句话说明">
+        </div>
+
+        <div class="field">
+          <label>分类 <span class="hint">用于分组，可空</span></label>
+          <input type="text" id="f-category" list="cat-list" placeholder="如 媒体 / 下载 / 运维">
+          <datalist id="cat-list"></datalist>
+        </div>
+
+        <div class="field inline-port">
+          <div>
+            <label>端口 <span class="hint">内网 / 组网</span></label>
+            <input type="number" id="f-port" min="1" max="65535" placeholder="如 8096">
+          </div>
+          <div>
+            <label>协议</label>
+            <select id="f-scheme">
+              <option value="">默认</option>
+              <option value="http">http</option>
+              <option value="https">https</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="check" id="tunnel-check">
+            <input type="checkbox" id="f-tunnel">
+            <span class="box"></span>
+            <span>
+              <div class="label-text">是否内网穿透</div>
+              <div class="sub">勾选后填写穿透 / Nginx 反代出的公网域名</div>
+            </span>
+          </label>
+        </div>
+
+        <div class="field" id="domain-field" data-collapsed="true">
+          <label>公网域名 <span class="hint">穿透 / 反代</span></label>
+          <input type="text" id="f-domain" class="mono" placeholder="如 jellyfin.example.com（不含 https://）">
+        </div>
+
+        <div class="collapse-toggle" id="adv-toggle">▸ 高级选项</div>
+        <div id="adv-section" data-collapsed="true">
+          <div class="field">
+            <label>自定义路径 <span class="hint">可空，如 /web</span></label>
+            <input type="text" id="f-path" class="mono" placeholder="/">
+          </div>
+        </div>
+
+        <div class="form-err" id="svc-err"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-close style="font-family:var(--sans);font-size:13px;padding:9px 14px">取消</button>
+        <button class="btn primary" id="svc-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 端口发现 ============ -->
+  <div class="overlay" id="disc-overlay">
+    <div class="modal disc-modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h3>端口发现</h3>
+        <button class="x" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field inline-2">
+          <div>
+            <label>目标主机 <span class="hint">IP 或域名</span></label>
+            <input type="text" id="d-host" class="mono" list="d-host-list" placeholder="192.168.1.50" spellcheck="false">
+            <datalist id="d-host-list"></datalist>
+          </div>
+          <div>
+            <label>扫描范围</label>
+            <select id="d-preset">
+              <option value="common">常用端口 · 151 个（几秒）</option>
+              <option value="1-10240">1 - 10240</option>
+              <option value="all">全部 1 - 65535（较慢）</option>
+              <option value="custom">自定义…</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field" id="d-custom-field" data-collapsed="true">
+          <label>端口写法 <span class="hint">逗号分隔，支持区间</span></label>
+          <input type="text" id="d-ports" class="mono" placeholder="80,443,8000-9000" spellcheck="false">
+        </div>
+
+        <div class="disc-note">
+          扫描从「服务索引」这个容器里发起，只看得到监听在 <b>0.0.0.0</b> 上的端口；
+          只绑了宿主机 <b>127.0.0.1</b> 的服务扫不到。出于安全考虑，默认只允许扫内网地址。
+        </div>
+
+        <div class="disc-progress" id="d-progress" hidden>
+          <div class="disc-track"><div class="disc-fill" id="d-fill"></div></div>
+          <div class="disc-stat" id="d-stat"></div>
+        </div>
+
+        <div class="disc-list" id="d-list"></div>
+        <div class="disc-empty" id="d-empty" hidden>没有发现开放端口</div>
+
+        <div class="form-err" id="d-err"></div>
+      </div>
+      <div class="modal-foot">
+        <span class="disc-count" id="d-count"></span>
+        <button class="btn ghost" id="d-stop" hidden style="font-family:var(--sans);font-size:13px;padding:9px 14px">停止</button>
+        <button class="btn ghost" data-close style="font-family:var(--sans);font-size:13px;padding:9px 14px">关闭</button>
+        <button class="btn primary" id="d-add" disabled>添加选中</button>
+        <button class="btn primary" id="d-run">开始扫描</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 修改密码 ============ -->
+  <div class="overlay" id="pw-overlay">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
+      <div class="modal-head">
+        <h3>修改密码</h3>
+        <button class="x" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>当前密码</label>
+          <input type="password" id="pw-cur" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>新密码 <span class="hint">至少 6 位</span></label>
+          <input type="password" id="pw-new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>确认新密码</label>
+          <input type="password" id="pw-new2" autocomplete="new-password">
+        </div>
+        <div class="form-err" id="pw-err"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-close style="font-family:var(--sans);font-size:13px;padding:9px 14px">取消</button>
+        <button class="btn primary" id="pw-save">更新密码</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="{{ url_for('static', filename='crypto.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

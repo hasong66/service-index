@@ -1,0 +1,10 @@
+# 仓库里一律用 LF。
+# 不加这条的话，在 Windows 上 clone 会把文件变成 CRLF，构建出的镜像里
+# 脚本和配置就带着 \r，Linux 容器内会出各种莫名其妙的问题。
+* text=auto eol=lf
+
+# 二进制文件别碰
+*.jpg binary
+*.png binary
+*.gif binary
+*.ico binary

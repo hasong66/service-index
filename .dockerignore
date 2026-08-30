@@ -1,0 +1,35 @@
+# 构建上下文里不该出现的东西。
+#
+# 最要紧的是 data/ —— 里面的 config.yaml 存着密码哈希和密码传输用的 RSA 私钥。
+# 现在的 Dockerfile 只 COPY 指定文件，它本来也进不了镜像；但只要哪天有人图省事
+# 改成 `COPY . .`，私钥就跟着镜像发出去了。这里直接从源头挡掉。
+data/
+*.yaml.bak
+config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 版本控制 / CI
+.git/
+.gitignore
+.github/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 文档、截图和示例：镜像里用不上，只会让每次构建多传一遍
+README.md
+LICENSE
+docs/
+config.example.yaml
+compose.yaml

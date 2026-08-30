@@ -1,0 +1,26 @@
+# 服务索引 — Dockge / docker compose 部署
+# 文件名必须是 compose.yaml（Dockge 扫描栈目录时只识别这个名字）。
+#
+# 用法：
+#   1. 把整个目录放到 ~/docker/service-index/（Dockge 的 stacks 目录）
+#   2. docker compose up -d  （或在 Dockge 里点 Deploy）
+#   3. 浏览器打开 http://<本机IP>:5000 ，首次访问会引导你设置密码
+#
+# 数据（config.yaml，含服务列表与密码哈希）持久化在 ./data 目录。
+
+services:
+  service-index:
+    build: .
+    # 如果你不想本地构建，也可以改成已推送的镜像：
+    # image: your-registry/service-index:latest
+    container_name: service-index
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
+    environment:
+      # 可选：自定义页面标题（也可在 config.yaml 里改）
+      # - TITLE=我的服务索引
+      # 容器内配置文件路径，一般无需改动
+      - CONFIG_PATH=/data/config.yaml

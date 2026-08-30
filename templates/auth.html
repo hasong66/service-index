@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ title }} · 登录</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
+</head>
+<body data-mode="{{ mode }}">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">▮▮▮</div>
+      <h1 id="auth-title">访问验证</h1>
+      <p class="muted" id="auth-sub"></p>
+
+      <div class="field">
+        <input id="pw" type="password" placeholder="密码" autocomplete="current-password">
+      </div>
+      <div class="field" id="confirm-field" hidden>
+        <input id="pw2" type="password" placeholder="再次输入确认" autocomplete="new-password">
+      </div>
+
+      <button class="btn primary block" id="auth-btn">进入</button>
+      <div class="auth-err" id="auth-err"></div>
+    </div>
+  </div>
+  <script src="{{ url_for('static', filename='crypto.js') }}"></script>
+  <script src="{{ url_for('static', filename='auth.js') }}"></script>
+</body>
+</html>
