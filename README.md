@@ -357,32 +357,6 @@ Cookie 拿到同等访问权。真正的端到端安全依旧要靠 HTTPS，本�
 
 ---
 
-## 构建与分发
-
-```bash
-# 本地构建
-docker build -t service-index:local .
-
-# 带版本号（会写进镜像的 OCI 标签）
-docker build --build-arg VERSION=1.0.0 -t service-index:1.0.0 .
-
-# 多架构（给 ARM 设备用，需要 buildx + binfmt）
-docker buildx build --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=1.0.0 -t <你的仓库>/service-index:1.0.0 --push .
-```
-
-几点说明：
-
-- **`.dockerignore` 挡掉了 `data/`**。那里面的 `config.yaml` 存着密码哈希和密码传输
-  用的 RSA 私钥。现在的 `COPY` 只拷指定文件，它本来也进不了镜像；挡一道是防着日后
-  有人图省事改成 `COPY . .`。同理仓库里有 `.gitignore`，`data/` 不要提交。
-- **镜像以 root 运行，这是有意的。** 换非 root 会让 `-v ./data:/data` 这种绑定挂载
-  在多数人机器上直接写不了配置文件（宿主目录通常属于 root 或另一个 uid），是自托管
-  镜像最常见的踩坑点。容器只监听 5000，不需要额外 capability。
-- 镜像自带 `HEALTHCHECK`，探 `/api/status`（该接口不需要登录，且会真读一次配置文件，
-  比单纯探 TCP 端口有意义）。
-- 镜像里**没有** `README.md` / `compose.yaml` / `config.example.yaml`，它们只是给人看的。
-
 ## 文件结构
 
 ```

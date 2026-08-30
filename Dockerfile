@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 # OCI 标准标签：别人 docker inspect 时能看清这镜像是什么、哪来的。
-# 版本号由构建时传入（见 README「构建与发布」），不传就是 dev。
+# 版本号由构建时传入：docker build --build-arg VERSION=1.0.0 ...；不传就是 dev。
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="Service Index" \
       org.opencontainers.image.description="网络感知的自托管服务导航页：按你访问用的地址自动跳到对应网络下的服务地址，并能扫描端口自动识别服务" \
