@@ -16,6 +16,8 @@
     view: null,     // 当前“视角”网络（卡片主点击使用）
     filter: "all",
     query: "",
+    health: {},      // 服务id -> up | down | unknown
+    background: null,  // null = 用主题自带的渐变底
   };
 
   // ---------- 工具 ----------
@@ -118,6 +120,53 @@
     return `background:hsl(${h} 42% 17%);color:hsl(${h} 72% 68%)`;
   }
 
+  // ---------- 背景 ----------
+  function renderBackground() {
+    const root = $("#bg-root");
+    if (!root) return;
+    const bg = STATE.background;
+    // 有自定义背景时，一部分文字要加深才看得清 —— 用这个类去开那批样式，
+    // 而不是无条件加深（没背景时纯属丑化）。
+    document.body.classList.toggle("has-bg", !!bg);
+    if (!bg) { root.innerHTML = ""; return; }
+    if (bg.type === "image") {
+      root.innerHTML = `<img class="bg-media" src="${escapeHtml(bg.url)}" alt="">`;
+      return;
+    }
+    // type 必须跟实际格式对上：写死 video/mp4 的话，传 webm 会直接播不出来
+    root.innerHTML =
+      `<video class="bg-media" autoplay muted loop playsinline>
+         <source src="${escapeHtml(bg.url)}" type="${escapeHtml(bg.mime || "video/mp4")}">
+       </video>`;
+  }
+
+  async function uploadBackground(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      // 这里不能走 api()：那个函数固定发 JSON，上传得用 multipart
+      const res = await fetch("/api/background", { method: "POST", body: fd });
+      if (res.status === 401) { location.href = "/login"; return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "上传失败");
+      applyConfig(data);
+      closeOverlay("#bg-overlay");
+      toast("背景已更新", "ok");
+    } catch (e) {
+      toast(e.message || "上传失败", "err");
+    }
+  }
+
+  async function resetBackground() {
+    try {
+      applyConfig(await api("POST", "/api/background/reset", {}));
+      closeOverlay("#bg-overlay");
+      toast("已恢复默认背景", "ok");
+    } catch (e) {
+      toast(e.message, "err");
+    }
+  }
+
   // ============================================================
   //  渲染
   // ============================================================
@@ -216,9 +265,14 @@
       .join("");
   }
 
+  const HEALTH_TITLE = { up: "运行中", down: "已离线", unknown: "状态未知" };
+
   function cardHtml(svc, idx) {
     const url = resolveUrl(svc, STATE.view);
     const reachable = !!url;
+    // 从 STATE 读而不是写死 unknown：render() 在搜索 / 切分类 / 切网络时都会
+    // 重建卡片，写死的话每次重建状态点都会先灭一轮。
+    const health = STATE.health[svc.id] || "unknown";
 
     // 主体（可达 -> a，不可达 -> div）
     let addr;
@@ -253,6 +307,7 @@
       .join("");
 
     return `<div class="card${reachable ? "" : " off"}" style="--i:${idx}" data-id="${escapeHtml(svc.id)}">
+              <span class="status-dot ${health}" data-role="status" title="${HEALTH_TITLE[health]}"></span>
               ${main}
               <div class="card-nets">${pills}</div>
               <div class="card-tools">
@@ -498,9 +553,11 @@
     STATE.services = data.services || [];
     STATE.detected = data.detected;
     STATE.host = data.host;
+    STATE.background = data.background || null;
 
     document.title = STATE.title;
     $("#app-title").textContent = STATE.title;
+    renderBackground();
 
     if (data.needs_networks) {
       startWizard(data);
@@ -512,6 +569,8 @@
     STATE.detected = clientDetected || data.detected;
     if (!STATE.view || !netById(STATE.view)) STATE.view = STATE.detected;
     render();
+    refreshHealth();
+    startHealthPolling();
   }
 
   // ============================================================
@@ -528,6 +587,18 @@
       location.href = "/login";
     });
     $("#btn-discover").addEventListener("click", openDiscover);
+    $("#btn-bg").addEventListener("click", () => {
+      $("#bg-reset").disabled = !STATE.background;
+      openOverlay("#bg-overlay");
+    });
+    $("#bg-pick").addEventListener("click", () => $("#bg-file-input").click());
+    $("#bg-reset").addEventListener("click", resetBackground);
+    $("#bg-file-input").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      await uploadBackground(file);
+      e.target.value = "";   // 传同一个文件两次也要能触发 change
+    });
     $("#btn-settings").addEventListener("click", () => {
       $("#pw-cur").value = $("#pw-new").value = $("#pw-new2").value = "";
       hideErr("#pw-err");
@@ -540,6 +611,7 @@
       if (!b) return;
       STATE.view = b.dataset.net;
       render();
+      refreshHealth();
     });
     $("#chips").addEventListener("click", (e) => {
       const b = e.target.closest("[data-chip]");
@@ -861,6 +933,44 @@
     if (failed.length) showErr("#d-err", "部分未添加：" + failed.join("；"));
     const ok = picked.length - failed.length;
     if (ok) toast(`已添加 ${ok} 个服务`, "ok");
+  }
+
+  // ============================================================
+  //  服务健康状态（运行 / 离线）
+  // ============================================================
+  const HEALTH_INTERVAL = 20000;
+  let healthTimer = null;
+
+  /** 就地更新状态点，不重建卡片 —— 轮询回来时不该让整个网格闪一下。 */
+  function updateHealthDots() {
+    $$(".card").forEach((card) => {
+      const dot = card.querySelector('[data-role="status"]');
+      if (!dot) return;
+      const st = STATE.health[card.dataset.id] || "unknown";
+      dot.className = "status-dot " + st;
+      dot.title = HEALTH_TITLE[st];
+    });
+  }
+
+  async function refreshHealth() {
+    if (!STATE.view) return;
+    try {
+      STATE.health = await api("GET", "/api/health?network=" + encodeURIComponent(STATE.view));
+      updateHealthDots();
+    } catch (e) {
+      // 静默失败，下一轮再试。探测挂了不该弹提示打扰人。
+    }
+  }
+
+  function startHealthPolling() {
+    if (healthTimer) return;
+    // 页面在后台就跳过：这是服务端发起的一批 TCP 连接，没人看的时候纯属白烧。
+    healthTimer = setInterval(() => {
+      if (!document.hidden) refreshHealth();
+    }, HEALTH_INTERVAL);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshHealth();
+    });
   }
 
   // ---------- 启动 ----------

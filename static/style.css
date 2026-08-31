@@ -100,6 +100,15 @@ body {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border-bottom: 1px solid var(--border-soft);
 }
+.topbar::after {           /* 底边的渐变光带，比一条直线耐看些 */
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  opacity: .5;
+  background: linear-gradient(90deg,
+    transparent, var(--accent-line) 20%, var(--accent-2) 50%, var(--accent-line) 80%, transparent);
+}
 .bar-inner {
   max-width: 1200px;
   margin: 0 auto;
@@ -116,7 +125,17 @@ body {
   font-size: 17px;
   text-shadow: 0 0 16px var(--accent-line);
 }
-.title { font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: .2px;
+  /* 渐变文字要有盒子才裁得住，行内元素在换行处会断掉 */
+  display: inline-block;
+  background: linear-gradient(90deg, #ffffff, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
 
 .search { flex: 1; min-width: 0; }
 .search input {
@@ -171,6 +190,20 @@ body {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent-line);
+  box-shadow: 0 0 16px -4px var(--accent-line);
+}
+.net-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 14px; right: 14px; bottom: -7px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: tabGlow 2.4s ease-in-out infinite;
+}
+@keyframes tabGlow {
+  0%, 100% { opacity: .4; }
+  50%      { opacity: 1; }
 }
 .net-tab .detect-dot {
   width: 6px; height: 6px; border-radius: 50%;
@@ -207,8 +240,17 @@ body {
   cursor: pointer;
   transition: all .14s ease;
 }
-.chip:hover { border-color: var(--border-glow); color: var(--text); }
-.chip.active { color: var(--bg); background: var(--text); border-color: var(--text); }
+.chip:hover {
+  border-color: var(--border-glow);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border-glow);
+}
+.chip.active {
+  color: var(--bg);
+  background: linear-gradient(180deg, var(--text), #c7d0dc);
+  border-color: transparent;
+  box-shadow: 0 4px 14px -6px rgba(0, 0, 0, 0.5);
+}
 
 .cat { margin-bottom: 30px; }
 .cat-title {
@@ -221,6 +263,14 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.cat-title::before {
+  content: "";
+  width: 6px; height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
 }
 .cat-title::after {
   content: "";
@@ -256,21 +306,30 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.card::before {           /* 左侧强调条 */
+.card::before {           /* 左侧强调条：常驻，颜色按 --bar 循环 */
   content: "";
   position: absolute;
   left: 0; top: 0; bottom: 0;
   width: 3px;
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  opacity: 0;
-  transition: opacity .16s ease;
+  background: var(--bar, var(--accent));
+  opacity: .8;
+  transition: opacity .16s ease, width .16s ease;
 }
+/* 五色循环，让一排卡片不至于糊成一片。用自定义属性给 ::before 传色，
+   免得再套一层 border-left 跟这条强调条打架。 */
+.cards .card:nth-child(5n + 1) { --bar: var(--accent); }
+.cards .card:nth-child(5n + 2) { --bar: var(--accent-2); }
+.cards .card:nth-child(5n + 3) { --bar: #b98cf0; }
+.cards .card:nth-child(5n + 4) { --bar: var(--warn); }
+.cards .card:nth-child(5n + 5) { --bar: #ff8fa3; }
 .card:hover {
-  transform: translateY(-3px);
-  border-color: var(--border-glow);
-  box-shadow: 0 14px 30px -18px rgba(0, 0, 0, 0.9);
+  transform: translateY(-4px);
+  border-color: var(--accent-line);
+  box-shadow:
+    0 18px 40px -20px rgba(0, 0, 0, 0.85),
+    0 0 26px -10px var(--accent-soft);
 }
-.card:hover::before { opacity: 1; }
+.card:hover::before { opacity: 1; width: 4px; }
 .card.off { opacity: .52; }
 .card.off:hover { transform: none; box-shadow: none; }
 
@@ -294,6 +353,9 @@ div.card-main { cursor: default; }
   font-size: 20px;
   font-weight: 700;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 5px rgba(0, 0, 0, 0.28);
 }
 .avatar.txt { font-family: var(--mono); font-size: 18px; }
 
@@ -807,4 +869,135 @@ select { appearance: none; cursor: pointer; }
   .wiz-card { padding: 24px 18px 20px; margin-top: 18px; }
   .wiz-net-head { flex-wrap: wrap; }
   .wiz-net-head .wiz-name { flex-basis: 100%; order: 3; }
+}
+
+/* ============================================================
+   滚动条
+   ============================================================ */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border: 2px solid var(--bg);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-glow); }
+
+/* ============================================================
+   页面顶部的一团柔光
+   ============================================================ */
+body::before {
+  content: "";
+  position: fixed;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1400px;
+  height: 800px;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(closest-side, var(--accent-soft), transparent 70%);
+  /* 呼吸感做在 opacity 上。原本的做法是动 body 的 background-position，
+     那是张 background-attachment: fixed 的整屏背景，每帧都要重绘整页；
+     opacity 走合成层，观感一样但基本不花钱。 */
+  animation: glowBreath 16s ease-in-out infinite;
+}
+@keyframes glowBreath {
+  0%, 100% { opacity: .5; }
+  50%      { opacity: 1; }
+}
+
+/* ============================================================
+   自定义背景
+   ============================================================ */
+#bg-root { pointer-events: none; }
+.bg-media {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 100%; min-height: 100%;
+  width: auto; height: auto;
+  object-fit: cover;
+  z-index: -1;            /* body 的渐变底会传播到画布，负层级依然盖得住 */
+  pointer-events: none;
+}
+
+/* 背景图往往比纯色底亮得多，几处半透明/浅色元素得压一压才读得清。
+   只在设了背景时生效 —— 没背景时这些加深纯属把界面弄脏。 */
+body.has-bg .topbar { background: rgba(10, 13, 18, 0.55); }
+body.has-bg .card {
+  background: rgba(17, 22, 31, 0.84);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+body.has-bg .chip {
+  background: rgba(10, 13, 18, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: var(--text);
+}
+body.has-bg .chip.active {
+  background: linear-gradient(180deg, var(--text), #c7d0dc);
+  color: var(--bg);
+}
+body.has-bg .cat-title {
+  color: var(--text);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+body.has-bg .cat-title .count { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); }
+body.has-bg .access { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); }
+
+.bg-tip {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+.bg-tip.dim { color: var(--text-faint); margin-bottom: 0; }
+.bg-tip code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   服务状态点
+   ============================================================ */
+.status-dot {
+  position: absolute;
+  top: 12px; right: 12px;
+  z-index: 2;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.3);
+  transition: background .3s ease, box-shadow .3s ease;
+}
+.status-dot.up {
+  background: #3ee08a;
+  box-shadow: 0 0 8px #3ee08a, 0 0 0 3px rgba(0, 0, 0, 0.3);
+}
+.status-dot.down {
+  background: #ff5470;
+  box-shadow: 0 0 8px #ff5470, 0 0 0 3px rgba(0, 0, 0, 0.3);
+}
+.status-dot.unknown { animation: statusPulse 1.6s ease-in-out infinite; }
+@keyframes statusPulse {
+  0%, 100% { opacity: .35; }
+  50%      { opacity: 1; }
+}
+
+/* ============================================================
+   系统设置里关了动效的，这里一律停掉
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

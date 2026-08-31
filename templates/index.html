@@ -8,6 +8,8 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
 </head>
 <body>
+  <div id="bg-root"></div>
+  <input type="file" id="bg-file-input" accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm" hidden>
   <header class="topbar">
     <div class="bar-inner">
       <div class="brand">
@@ -19,6 +21,7 @@
       </div>
       <div class="actions">
         <button class="btn ghost" id="btn-discover" title="端口发现">🔍</button>
+        <button class="btn ghost" id="btn-bg" title="自定义背景">🖼</button>
         <button class="btn ghost" id="btn-settings" title="修改密码">⚙</button>
         <button class="btn ghost" id="btn-logout" title="退出登录">⎋</button>
         <button class="btn primary" id="btn-add">＋ 添加服务</button>
@@ -214,6 +217,30 @@
   </div>
 
   <!-- ============ 修改密码 ============ -->
+  <div class="overlay" id="bg-overlay">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
+      <div class="modal-head">
+        <h3>自定义背景</h3>
+        <button class="x" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="bg-tip">
+          选一张图片或一段视频当页面背景。文件存在 <code>data/uploads</code>，
+          跟配置一起留在挂载卷上，重建容器不会丢。
+        </p>
+        <p class="bg-tip dim">
+          支持 jpg / png / webp / gif / mp4 / webm，单个文件最大 64 MB。
+          同时只保留一张，换新的会覆盖旧的。
+        </p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="bg-reset"
+                style="font-family:var(--sans);font-size:13px;padding:9px 14px">恢复默认</button>
+        <button class="btn primary" id="bg-pick">选择文件…</button>
+      </div>
+    </div>
+  </div>
+
   <div class="overlay" id="pw-overlay">
     <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
       <div class="modal-head">

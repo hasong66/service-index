@@ -33,14 +33,16 @@ import ipaddress
 import json
 import time
 import base64
+import socket
 import secrets
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 
 import yaml
 from flask import (
     Flask, request, session, jsonify, redirect, url_for, render_template,
-    Response,
+    Response, send_from_directory,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from cryptography.hazmat.primitives import hashes, serialization
@@ -54,6 +56,28 @@ import discover
 CONFIG_PATH = os.environ.get(
     "CONFIG_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
 )
+
+# 自定义背景存在 config.yaml 旁边（容器里就是 /data/uploads）。
+#
+# 不能放 static/ 下：那是镜像里的目录，`docker compose up -d --build` 一重建就没了，
+# 而 config.yaml 还记着文件名 —— 结果就是背景莫名其妙变空白。这个项目的约定是
+# 「状态一律在 /data」，上传的文件也不例外。
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(CONFIG_PATH)), "uploads")
+
+# 背景文件。名字是固定的 bg-custom.<ext>：同时只允许存在一张，省得 uploads 目录
+# 越攒越大，也让「文件名可控」这件事变成路径穿越的天然防线。
+BG_STEM = "bg-custom"
+BG_IMAGE_EXT = {"jpg", "jpeg", "png", "webp", "gif"}
+BG_VIDEO_EXT = {"mp4", "webm"}
+BG_EXT = BG_IMAGE_EXT | BG_VIDEO_EXT
+BG_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "webp": "image/webp", "gif": "image/gif",
+    "mp4": "video/mp4", "webm": "video/webm",
+}
+# 上传体积上限（字节）。这个值会挂到 MAX_CONTENT_LENGTH 上，由 Werkzeug 在解析
+# 请求体的时候就掐断，不会先把整个文件收下来再回过头判断大小。
+MAX_UPLOAD = 64 * 1024 * 1024
 
 # 默认配置（首次启动且没有 config.yaml 时写入）。
 #
@@ -72,6 +96,9 @@ DEFAULT_CONFIG = {
         "concurrency": 256,      # 并发连接数
         "allow_public": False,   # 是否允许扫描公网地址
     },
+    # 自定义背景。None = 用主题自带的渐变底，也就是不设背景。
+    # 网页上传之后变成 {"type": "image"|"video", "file": "bg-custom.jpg"}
+    "background": None,
     # 首次启动留空，由网页引导填写（也可以直接手写 config.yaml，见 config.example.yaml）
     "networks": [],
     "services": [],
@@ -209,6 +236,8 @@ def _ensure_structure(cfg):
         for k, v in DEFAULT_CONFIG["discover"].items():
             if k not in cfg["discover"]:
                 cfg["discover"][k] = v; changed = True
+    if "background" not in cfg:
+        cfg["background"] = None; changed = True
     if "networks" not in cfg or cfg["networks"] is None:
         cfg["networks"] = []; changed = True
     if "services" not in cfg or cfg["services"] is None:
@@ -323,6 +352,42 @@ def suggest_network(hostname):
             "host": h, "match": [pattern]}
 
 
+def safe_bg_name(name):
+    """只认我们自己写出去的那个文件名。
+
+    上传接口写死了 bg-custom.<ext>，所以这里可以用白名单而不是路径规范化来挡
+    穿越 —— 凡是对不上这个形状的一律当不存在。
+    """
+    if "." not in name:
+        return False
+    stem, ext = name.rsplit(".", 1)
+    return stem == BG_STEM and ext.lower() in BG_EXT
+
+
+def background_info(cfg):
+    """把配置里的背景翻译成前端能直接用的 URL；没有 / 文件丢了都返回 None。
+
+    文件可能不在：手动删过 data/uploads，或者从别的机器拷了份 config.yaml 过来。
+    这时候返回 None 让前端回落到默认渐变底，而不是渲染一个加载失败的 <img>。
+    """
+    bg = cfg.get("background")
+    if not isinstance(bg, dict):
+        return None
+    name = bg.get("file") or ""
+    kind = bg.get("type")
+    if kind not in ("image", "video") or not safe_bg_name(name):
+        return None
+    path = os.path.join(UPLOAD_DIR, name)
+    if not os.path.exists(path):
+        return None
+    # 文件名固定，换一张图名字不变 —— 不带版本号的话浏览器会拿缓存里的旧图。
+    return {
+        "type": kind,
+        "url": "/bg/%s?v=%d" % (name, int(os.path.getmtime(path))),
+        "mime": BG_MIME.get(name.rsplit(".", 1)[-1].lower(), ""),
+    }
+
+
 def public_config(cfg):
     """返回给前端的安全配置（剔除 secret_key / password_hash / transport_key）。"""
     host = request_host()
@@ -336,6 +401,8 @@ def public_config(cfg):
         # 一个网络都没有 -> 前端显示引导页，而不是一张空网格
         "needs_networks": not networks,
         "suggest": suggest_network(host) if not networks else None,
+        # None = 没设背景，前端用主题自带的渐变底
+        "background": background_info(cfg),
     }
 
 
@@ -450,7 +517,15 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30,  # 30 天
     JSON_AS_ASCII=False,
+    # 请求体硬上限，超了 Werkzeug 直接抛 413，不会把文件收完再判断。
+    # 除了上传背景，其余接口的请求体都是几 KB 的 JSON，用同一个上限没问题。
+    MAX_CONTENT_LENGTH=MAX_UPLOAD,
 )
+
+
+@app.errorhandler(413)
+def too_large(_e):
+    return jsonify({"error": "文件太大，最大 %d MB" % (MAX_UPLOAD // (1024 * 1024))}), 413
 
 
 def needs_setup():
@@ -688,6 +763,149 @@ def api_delete_service(sid):
     cfg["services"] = [s for s in cfg["services"] if s.get("id") != sid]
     if len(cfg["services"]) == before:
         return jsonify({"error": "服务不存在"}), 404
+    save_config(cfg)
+    return jsonify(public_config(cfg))
+
+
+# ---------------------------------------------------------------------------
+# 服务健康检查
+# ---------------------------------------------------------------------------
+# 只是 TCP connect 一下就关掉，不发任何数据。所以判断的是「端口通不通」，
+# 不是「服务是否正常」—— 反代后面的域名探 443 通，只说明反代活着。
+HEALTH_TIMEOUT = 1.5
+HEALTH_WORKERS = 32
+
+
+def _tcp_open(host, port, timeout=HEALTH_TIMEOUT):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _health_target(svc, net):
+    """算出这个服务在指定网络下该探哪个 host:port，口径跟前端 resolveUrl 一致。"""
+    if not net:
+        return None
+    if net.get("mode") == "domain":
+        domain = (svc.get("domains") or {}).get(net["id"]) or svc.get("domain")
+        if not domain:
+            return None
+        return domain, 443 if (svc.get("scheme") or "https") == "https" else 80
+    host = (svc.get("hosts") or {}).get(net["id"]) or net.get("host")
+    port = svc.get("port")
+    if not host or not port:
+        return None
+    return host, port
+
+
+@app.get("/api/health")
+@login_required
+def api_health():
+    """探测当前视角网络下各服务的连通性，返回 {服务id: up|down|unknown}。
+
+    在这个网络下解析不出地址的服务（没配 host / 没配域名）返回 unknown，
+    而不是 down —— 那是「没配」，不是「挂了」。
+    """
+    cfg = load_config()
+    net_id = request.args.get("network") or ""
+    net = next((n for n in (cfg.get("networks") or []) if n.get("id") == net_id), None)
+    services = [s for s in (cfg.get("services") or []) if s.get("id")]
+
+    result = {s["id"]: "unknown" for s in services}
+    targets = {}
+    for s in services:
+        t = _health_target(s, net)
+        if t:
+            targets[s["id"]] = t
+    if not targets:
+        return jsonify(result)
+
+    with ThreadPoolExecutor(max_workers=min(HEALTH_WORKERS, len(targets))) as ex:
+        futures = {ex.submit(_tcp_open, h, p): sid for sid, (h, p) in targets.items()}
+        for fut, sid in futures.items():
+            result[sid] = "up" if fut.result() else "down"
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# 自定义背景
+# ---------------------------------------------------------------------------
+def _drop_backgrounds(keep=None):
+    """删掉除 keep 以外的所有背景文件。
+
+    换背景时后缀可能变（jpg -> mp4），不清理的话旧文件会一直躺在 uploads 里。
+
+    删不掉就算了：Windows 上如果这个文件恰好还在被某个响应读着，remove 会失败。
+    残留的文件已经没人引用，下次传同后缀的图会直接覆盖掉，不值得为它重试。
+    """
+    for ext in BG_EXT:
+        name = BG_STEM + "." + ext
+        if name == keep:
+            continue
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, name))
+        except OSError:
+            pass
+
+
+@app.get("/bg/<name>")
+@login_required
+def serve_background(name):
+    """发 data/uploads 里的背景文件。
+
+    static/ 是 Flask 自己管的镜像内目录，这份要单开一个路由，因为文件在挂载卷上。
+    """
+    if not safe_bg_name(name):
+        return jsonify({"error": "无效的文件名"}), 404
+    resp = send_from_directory(UPLOAD_DIR, name)
+    # 用户上传的文件从本站域名发出，钉死 Content-Type，不让浏览器嗅探
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    # URL 上带了 mtime 版本号，可以放心让浏览器缓存
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
+
+
+@app.post("/api/background")
+@login_required
+def api_set_background():
+    """上传背景图 / 视频。
+
+    这个接口是 multipart 的，用不了 require_json 那道 CSRF 缓解；实际挡住跨站
+    提交的是 SESSION_COOKIE_SAMESITE="Lax" —— 跨站 POST 根本带不上会话 cookie。
+    """
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "请选择要上传的文件"}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in BG_EXT:
+        return jsonify({"error": "只支持图片 (jpg/png/webp/gif) 或视频 (mp4/webm)"}), 400
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    name = BG_STEM + "." + ext
+    # 先落临时文件再 rename：传到一半断了不会把正在用的背景弄坏
+    tmp = os.path.join(UPLOAD_DIR, name + ".tmp")
+    f.save(tmp)
+    os.replace(tmp, os.path.join(UPLOAD_DIR, name))
+    _drop_backgrounds(keep=name)
+
+    cfg = load_config()
+    cfg["background"] = {
+        "type": "image" if ext in BG_IMAGE_EXT else "video",
+        "file": name,
+    }
+    save_config(cfg)
+    return jsonify(public_config(cfg))
+
+
+@app.post("/api/background/reset")
+@login_required
+@require_json
+def api_reset_background():
+    _drop_backgrounds()
+    cfg = load_config()
+    cfg["background"] = None
     save_config(cfg)
     return jsonify(public_config(cfg))
 
