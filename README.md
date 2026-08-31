@@ -425,6 +425,10 @@ service-index/
 
 Issue 和 PR 都欢迎，但请理解响应可能不及时。
 
+## 致谢
+
+- [@shukerrrrrr](https://github.com/shukerrrrrr) — 服务在线状态、自定义背景（[#1](https://github.com/hasong66/service-index/pull/1)）
+
 ## License
 
 [MIT](LICENSE) © hasong66
