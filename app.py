@@ -832,13 +832,19 @@ def _health_target(svc, net):
 def _pick_probe(svc, view, networks):
     """给一个服务挑「从哪儿探」，返回 (host, port, 借用的网络名 or None)。
 
-    优先用当前视角那个网络的地址。它要是不可信（哨兵判定「什么端口都通」），
-    就按 networks 的顺序找第一个可信的网络借地址 —— 反正三个网络指向的是同一台
-    机器，从内网探到的「端口通不通」跟从组网探到的是同一件事，只是内网那条路
-    不会撒谎。借了就把网络名带回去，前端在悬浮提示里说明，不含糊其辞。
+    先用当前视角这个网络的地址。它要是不可信（哨兵判定「什么端口都通」），
+    才按 networks 的顺序借一个可信网络的地址 —— 各网络指向的是同一台机器，
+    「端口通不通」是同一件事，只是那条路不会撒谎。借了就把网络名带回去，
+    前端在悬浮提示里写明，不含糊。
+
+    但「当前网络下解析不出地址」不借：那说明这个服务在这个网络下**本来就到不了**
+    （比如没给它配公网域名），不是探不准。这时候借内网地址探出一个绿点，等于凭空
+    编了个「公网可达」出来。该给灰点就给灰点。
     """
     direct = _health_target(svc, view)
-    if direct and _target_trustworthy(view, direct):
+    if not direct:
+        return None
+    if _target_trustworthy(view, direct):
         return direct[0], direct[1], None
     for net in networks:
         if not view or net.get("id") == view.get("id"):
