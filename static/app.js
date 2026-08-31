@@ -17,6 +17,7 @@
     filter: "all",
     query: "",
     health: {},      // 服务id -> up | down | unknown
+    healthVia: {},   // 服务id -> 借用了哪个网络的地址去探（当前网络不可信时）
     background: null,  // null = 用主题自带的渐变底
   };
 
@@ -267,6 +268,13 @@
 
   const HEALTH_TITLE = { up: "运行中", down: "已离线", unknown: "状态未知" };
 
+  /** 悬浮提示。借了别的网络的地址探测时说清楚，别让人以为探的是当前这个。 */
+  function healthTitle(id) {
+    const t = HEALTH_TITLE[STATE.health[id] || "unknown"];
+    const via = STATE.healthVia[id];
+    return via ? t + "（当前网络的地址探不出真假，此处探测自「" + via + "」）" : t;
+  }
+
   function cardHtml(svc, idx) {
     const url = resolveUrl(svc, STATE.view);
     const reachable = !!url;
@@ -307,7 +315,7 @@
       .join("");
 
     return `<div class="card${reachable ? "" : " off"}" style="--i:${idx}" data-id="${escapeHtml(svc.id)}">
-              <span class="status-dot ${health}" data-role="status" title="${HEALTH_TITLE[health]}"></span>
+              <span class="status-dot ${health}" data-role="status" title="${escapeHtml(healthTitle(svc.id))}"></span>
               ${main}
               <div class="card-nets">${pills}</div>
               <div class="card-tools">
@@ -948,14 +956,16 @@
       if (!dot) return;
       const st = STATE.health[card.dataset.id] || "unknown";
       dot.className = "status-dot " + st;
-      dot.title = HEALTH_TITLE[st];
+      dot.title = healthTitle(card.dataset.id);
     });
   }
 
   async function refreshHealth() {
     if (!STATE.view) return;
     try {
-      STATE.health = await api("GET", "/api/health?network=" + encodeURIComponent(STATE.view));
+      const data = await api("GET", "/api/health?network=" + encodeURIComponent(STATE.view));
+      STATE.health = data.states || {};
+      STATE.healthVia = data.via || {};
       updateHealthDots();
     } catch (e) {
       // 静默失败，下一轮再试。探测挂了不该弹提示打扰人。

@@ -32,6 +32,7 @@ import sys
 import ipaddress
 import json
 import time
+import random
 import base64
 import socket
 import secrets
@@ -775,6 +776,15 @@ def api_delete_service(sid):
 HEALTH_TIMEOUT = 1.5
 HEALTH_WORKERS = 32
 
+# 哨兵探测：判断一个地址是不是「什么端口都通」。
+#
+# 组网 / VPN 那类用户态 TUN 协议栈（本机上是 NodeBabyLink）会替任意端口完成 TCP
+# 握手，对着这种地址做连通性探测，结果永远是通 —— 一排假绿比没有状态还糟。
+# 打几个随机高位端口，全通就判这个地址不可信，改从别的网络借地址来探。
+SENTINEL_PORTS = 3
+SENTINEL_TTL = 300           # 判定结果缓存多久（秒）
+_sentinel_cache = {}         # host -> (可信?, 过期时间戳)
+
 
 def _tcp_open(host, port, timeout=HEALTH_TIMEOUT):
     try:
@@ -782,6 +792,25 @@ def _tcp_open(host, port, timeout=HEALTH_TIMEOUT):
             return True
     except OSError:
         return False
+
+
+def _host_trustworthy(host):
+    """这个地址的探测结果可不可信。带 5 分钟缓存，免得每轮轮询都重打一遍。
+
+    多 worker 下每个进程各存一份，无所谓 —— 这只是省几个连接的优化，
+    算错了最坏也就是多探一次。
+    """
+    now = time.time()
+    hit = _sentinel_cache.get(host)
+    if hit and hit[1] > now:
+        return hit[0]
+    picks = random.sample(range(49152, 65500), SENTINEL_PORTS)
+    with ThreadPoolExecutor(max_workers=SENTINEL_PORTS) as ex:
+        opened = sum(ex.map(lambda p: _tcp_open(host, p, HEALTH_TIMEOUT), picks))
+    # 随机高位端口全通 = 这地址对谁都说通
+    trusted = opened < SENTINEL_PORTS
+    _sentinel_cache[host] = (trusted, now + SENTINEL_TTL)
+    return trusted
 
 
 def _health_target(svc, net):
@@ -800,33 +829,67 @@ def _health_target(svc, net):
     return host, port
 
 
+def _pick_probe(svc, view, networks):
+    """给一个服务挑「从哪儿探」，返回 (host, port, 借用的网络名 or None)。
+
+    优先用当前视角那个网络的地址。它要是不可信（哨兵判定「什么端口都通」），
+    就按 networks 的顺序找第一个可信的网络借地址 —— 反正三个网络指向的是同一台
+    机器，从内网探到的「端口通不通」跟从组网探到的是同一件事，只是内网那条路
+    不会撒谎。借了就把网络名带回去，前端在悬浮提示里说明，不含糊其辞。
+    """
+    direct = _health_target(svc, view)
+    if direct and _target_trustworthy(view, direct):
+        return direct[0], direct[1], None
+    for net in networks:
+        if not view or net.get("id") == view.get("id"):
+            continue
+        t = _health_target(svc, net)
+        if t and _target_trustworthy(net, t):
+            return t[0], t[1], net.get("name") or net.get("id")
+    return None
+
+
+def _target_trustworthy(net, target):
+    """域名一律当可信：反代能应 443 本身就是有意义的信号，
+    而且逐个域名打哨兵既慢又容易被当成扫描。只对端口模式的主机做判定。"""
+    if not net or net.get("mode") == "domain":
+        return True
+    return _host_trustworthy(target[0])
+
+
 @app.get("/api/health")
 @login_required
 def api_health():
-    """探测当前视角网络下各服务的连通性，返回 {服务id: up|down|unknown}。
+    """探测各服务的连通性。
 
-    在这个网络下解析不出地址的服务（没配 host / 没配域名）返回 unknown，
+    返回 {"states": {服务id: up|down|unknown}, "via": {服务id: 借用的网络名}}。
+
+    在当前网络下解析不出地址的服务（没配 host / 没配域名）是 unknown，
     而不是 down —— 那是「没配」，不是「挂了」。
     """
     cfg = load_config()
+    networks = cfg.get("networks") or []
     net_id = request.args.get("network") or ""
-    net = next((n for n in (cfg.get("networks") or []) if n.get("id") == net_id), None)
+    view = next((n for n in networks if n.get("id") == net_id), None)
     services = [s for s in (cfg.get("services") or []) if s.get("id")]
 
-    result = {s["id"]: "unknown" for s in services}
+    states = {s["id"]: "unknown" for s in services}
+    via = {}
     targets = {}
     for s in services:
-        t = _health_target(s, net)
-        if t:
-            targets[s["id"]] = t
+        pick = _pick_probe(s, view, networks)
+        if pick:
+            targets[s["id"]] = (pick[0], pick[1])
+            if pick[2]:
+                via[s["id"]] = pick[2]
     if not targets:
-        return jsonify(result)
+        return jsonify({"states": states, "via": via})
 
     with ThreadPoolExecutor(max_workers=min(HEALTH_WORKERS, len(targets))) as ex:
         futures = {ex.submit(_tcp_open, h, p): sid for sid, (h, p) in targets.items()}
         for fut, sid in futures.items():
-            result[sid] = "up" if fut.result() else "down"
-    return jsonify(result)
+            states[sid] = "up" if fut.result() else "down"
+    return jsonify({"states": states, "via": via})
 
 
 # ---------------------------------------------------------------------------
