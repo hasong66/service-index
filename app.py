@@ -47,6 +47,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 import discover
+import socket
+from concurrent.futures import ThreadPoolExecutor
 
 # ---------------------------------------------------------------------------
 # 配置文件
@@ -336,6 +338,7 @@ def public_config(cfg):
         # 一个网络都没有 -> 前端显示引导页，而不是一张空网格
         "needs_networks": not networks,
         "suggest": suggest_network(host) if not networks else None,
+        "background": cfg.get("background") or {"type": "video", "src": "bg.mp4"},
     }
 
 
@@ -688,6 +691,116 @@ def api_delete_service(sid):
     cfg["services"] = [s for s in cfg["services"] if s.get("id") != sid]
     if len(cfg["services"]) == before:
         return jsonify({"error": "服务不存在"}), 404
+    save_config(cfg)
+    return jsonify(public_config(cfg))
+
+
+# ---------------------------------------------------------------------------
+# 服务健康检查（TCP 连通性）
+# ---------------------------------------------------------------------------
+def check_tcp(host, port, timeout=1.5):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _health_target(svc, net):
+    """按当前查看的网络算出用来做健康检查的 (host, port)，逻辑与前端 resolveUrl 对应。"""
+    if not net:
+        return None
+    if net.get("mode") == "domain":
+        domain = (svc.get("domains") or {}).get(net["id"]) or svc.get("domain")
+        if not domain:
+            return None
+        scheme = svc.get("scheme") or "https"
+        return domain, (443 if scheme == "https" else 80)
+    host = (svc.get("hosts") or {}).get(net["id"]) or net.get("host")
+    port = svc.get("port")
+    if not host or not port:
+        return None
+    return host, port
+
+
+@app.get("/api/health")
+@login_required
+def api_health():
+    cfg = load_config()
+    net_id = request.args.get("network") or ""
+    net = next((n for n in cfg.get("networks", []) or [] if n.get("id") == net_id), None)
+    services = cfg.get("services", []) or []
+
+    targets = {}
+    for s in services:
+        t = _health_target(s, net)
+        if t:
+            targets[s["id"]] = t
+
+    result = {s["id"]: "unknown" for s in services}
+    if targets:
+        with ThreadPoolExecutor(max_workers=min(32, len(targets))) as ex:
+            futs = {ex.submit(check_tcp, h, p): sid for sid, (h, p) in targets.items()}
+            for fut in futs:
+                sid = futs[fut]
+                result[sid] = "up" if fut.result() else "down"
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# 自定义背景（上传图片 / 恢复默认视频）
+# ---------------------------------------------------------------------------
+ALLOWED_IMG_EXT = {"jpg", "jpeg", "png", "webp", "gif"}
+ALLOWED_VIDEO_EXT = {"mp4", "webm"}
+ALLOWED_BG_EXT = ALLOWED_IMG_EXT | ALLOWED_VIDEO_EXT
+MAX_BG_SIZE = 200 * 1024 * 1024  # 200MB，视频文件比图片大得多
+
+
+def _bg_dir():
+    d = os.path.join(app.static_folder, "uploads")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+@app.post("/api/background")
+@login_required
+def api_background():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "请选择要上传的文件"}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED_BG_EXT:
+        return jsonify({"error": "只支持图片 (jpg/png/webp/gif) 或视频 (mp4/webm)"}), 400
+
+    f.seek(0, os.SEEK_END)
+    size = f.tell()
+    f.seek(0)
+    if size > MAX_BG_SIZE:
+        return jsonify({"error": "文件太大，最大支持 200MB"}), 400
+
+    fname = "bg-custom." + ext
+    # 清掉其它后缀的旧自定义背景，避免垃圾文件越攒越多
+    for old_ext in ALLOWED_BG_EXT:
+        old_path = os.path.join(_bg_dir(), "bg-custom." + old_ext)
+        if old_ext != ext and os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+    f.save(os.path.join(_bg_dir(), fname))
+
+    bg_type = "video" if ext in ALLOWED_VIDEO_EXT else "image"
+    cfg = load_config()
+    cfg["background"] = {"type": bg_type, "src": "uploads/" + fname}
+    save_config(cfg)
+    return jsonify(public_config(cfg))
+
+
+@app.post("/api/background/reset")
+@login_required
+def api_background_reset():
+    cfg = load_config()
+    cfg["background"] = {"type": "video", "src": "bg.mp4"}
     save_config(cfg)
     return jsonify(public_config(cfg))
 

@@ -14,10 +14,10 @@
   --text:         #e7edf5;
   --text-dim:     #93a0b4;
   --text-faint:   #5e6b7e;
-  --accent:       #38e0a6;
-  --accent-2:     #2fd0e0;
-  --accent-soft:  rgba(56, 224, 166, 0.12);
-  --accent-line:  rgba(56, 224, 166, 0.35);
+  --accent:       #4da3ff;
+  --accent-2:     #7c8cff;
+  --accent-soft:  rgba(77, 163, 255, 0.12);
+  --accent-line:  rgba(77, 163, 255, 0.35);
   --danger:       #ff6b6b;
   --danger-soft:  rgba(255, 107, 107, 0.12);
   --warn:         #f5b955;
@@ -39,8 +39,8 @@ body {
   color: var(--text);
   background-color: var(--bg);
   background-image:
-    radial-gradient(900px 500px at 78% -8%, rgba(56, 224, 166, 0.07), transparent 60%),
-    radial-gradient(700px 480px at 8% 0%, rgba(47, 208, 224, 0.05), transparent 55%),
+    radial-gradient(900px 500px at 78% -8%, rgba(77, 163, 255, 0.07), transparent 60%),
+    radial-gradient(700px 480px at 8% 0%, rgba(124, 140, 255, 0.05), transparent 55%),
     radial-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px);
   background-size: auto, auto, 22px 22px;
   background-attachment: fixed;
@@ -72,7 +72,7 @@ body {
   background: linear-gradient(180deg, #3ae9ac, #2bc594);
   border-color: transparent;
   color: #04201a;
-  box-shadow: 0 4px 18px -8px rgba(56, 224, 166, 0.7);
+  box-shadow: 0 4px 18px -8px rgba(77, 163, 255, 0.7);
 }
 .btn.primary:hover { filter: brightness(1.06); }
 .btn.ghost {
@@ -698,7 +698,7 @@ select { appearance: none; cursor: pointer; }
   letter-spacing: .3px;
 }
 .disc-tag.high { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.disc-tag.medium { color: var(--accent-2); border-color: rgba(47, 208, 224, .3); }
+.disc-tag.medium { color: var(--accent-2); border-color: rgba(124, 140, 255, .3); }
 .disc-tag.low { color: var(--warn); border-color: rgba(245, 185, 85, .3); }
 .disc-tag.none { color: var(--text-faint); border-color: var(--border); }
 .disc-tag.have { color: var(--text-faint); border-color: var(--border); }
@@ -807,4 +807,275 @@ select { appearance: none; cursor: pointer; }
   .wiz-card { padding: 24px 18px 20px; margin-top: 18px; }
   .wiz-net-head { flex-wrap: wrap; }
   .wiz-net-head .wiz-name { flex-basis: 100%; order: 3; }
+}
+
+/* ============================================================
+   美化补丁 · 追加增强
+   ============================================================ */
+
+/* 自定义滚动条，暗色主题下默认滚动条太突兀 */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 5px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-glow); }
+
+/* 卡片悬浮增强：上浮 + 边框发光 + 柔和阴影 */
+.card:hover {
+  transform: translateY(-5px);
+  border-color: var(--accent-line);
+  box-shadow:
+    0 20px 45px -20px rgba(0, 0, 0, 0.7),
+    0 0 0 1px var(--accent-line),
+    0 0 30px -8px var(--accent-soft);
+}
+
+/* 标题加一点文字光晕，呼应logo的发光效果 */
+.title {
+  display: inline-block !important;
+  background: linear-gradient(90deg, #ffffff, var(--accent), var(--accent-2)) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+}
+
+/* 网络切换标签：激活态加一点呼吸光晕 */
+.net-tab.active {
+  box-shadow: 0 0 16px -4px var(--accent-line);
+}
+
+/* 分类筛选chip激活态用渐变，更有质感 */
+.chip.active {
+  background: linear-gradient(180deg, var(--text), #c7d0dc);
+  border-color: transparent;
+}
+
+/* 卡片内图标/头像加一点内阴影质感，避免纯色块过于扁平 */
+.card .avatar,
+.avatar {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 4px rgba(0,0,0,0.25);
+}
+
+/* 整体背景再叠加一层极淡的顶部光晕，增加纵深感 */
+body::before {
+  content: "";
+  position: fixed;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1400px;
+  height: 800px;
+  background: radial-gradient(closest-side, rgba(77, 163, 255, 0.05), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 输入框聚焦时的过渡更顺滑 */
+.search input {
+  transition: border-color .2s ease, box-shadow .25s ease, background .2s ease;
+}
+
+/* ============================================================
+   完整美化方案 · 卡片 / 顶栏 / 分类
+   ============================================================ */
+
+/* ---- 卡片：左侧彩色竞边条，循环配色，增加视觉层次和区分度 ---- */
+
+.card {
+  border-left: 3px solid var(--accent) !important;
+  transition: border-left-width .2s ease, transform .16s ease, border-color .16s ease, box-shadow .16s ease !important;
+}
+.card:hover { border-left-width: 4px !important; }
+
+.cards .card:nth-child(5n+1) { border-left-color: var(--accent) !important; }
+.cards .card:nth-child(5n+2) { border-left-color: var(--accent-2) !important; }
+.cards .card:nth-child(5n+3) { border-left-color: #b98cf0 !important; }
+.cards .card:nth-child(5n+4) { border-left-color: var(--warn) !important; }
+.cards .card:nth-child(5n+5) { border-left-color: #ff8fa3 !important; }
+
+/* ---- 头像/图标：加一圈微光边框，提升立体感 ---- */
+.avatar {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.1),
+    inset 0 -1px 5px rgba(0,0,0,0.3),
+    0 0 0 1px rgba(255,255,255,0.05);
+}
+
+/* ---- 分类标题：加彩色小圆点，替代纯文字更醒目 ---- */
+.cat-title {
+  position: relative;
+  padding-left: 14px;
+}
+.cat-title::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* ---- 筛选chip：hover光晕 + 选中态阴影质感 ---- */
+.chip:hover {
+  box-shadow: 0 0 0 1px var(--border-glow) inset;
+}
+.chip.active {
+  box-shadow: 0 4px 14px -6px rgba(0,0,0,0.5);
+}
+
+/* ---- 网络切换标签：选中项加呼吸下划线动效 ---- */
+.net-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 14px; right: 14px; bottom: -7px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: tabGlow 2.4s ease-in-out infinite;
+}
+@keyframes tabGlow {
+  0%, 100% { opacity: .4; }
+  50% { opacity: 1; }
+}
+
+/* ---- 顶栏：底部描边换成渐变光带，替代纯直线更有质感 ---- */
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, var(--accent-line) 20%, var(--accent-2) 50%, var(--accent-line) 80%, transparent);
+  opacity: .5;
+}
+
+/* ---- 背景氛围：径向光斑缓慢呼吸位移，页面更有生气 ---- */
+body {
+  animation: bgBreath 16s ease-in-out infinite;
+}
+@keyframes bgBreath {
+  0%, 100% { background-position: 0 0, 0 0, 0 0; }
+  50% { background-position: 2% -1%, -2% 1%, 0 0; }
+}
+
+/* ============================================================
+   服务状态点 · 运行 / 离线 / 检测中
+   ============================================================ */
+.card { position: relative; }
+
+.status-dot {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  z-index: 2;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.3);
+  transition: background .3s ease, box-shadow .3s ease;
+}
+
+.status-dot.up {
+  background: #3ee08a;
+  box-shadow: 0 0 8px #3ee08a, 0 0 0 3px rgba(0,0,0,0.3);
+}
+
+.status-dot.down {
+  background: #ff5470;
+  box-shadow: 0 0 8px #ff5470, 0 0 0 3px rgba(0,0,0,0.3);
+}
+
+.status-dot.unknown {
+  background: var(--text-faint);
+  animation: statusPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: .35; }
+  50% { opacity: 1; }
+}
+
+/* ============================================================
+   视频背景
+   ============================================================ */
+.bg-video {
+  position: fixed;
+  top: 50%; left: 50%;
+  min-width: 100%; min-height: 100%;
+  width: auto; height: auto;
+  transform: translate(-50%, -50%);
+  object-fit: cover;
+  z-index: -2;
+}
+
+.bg-overlay {
+  display: none;
+}
+/* body 原本的纯色/渐变背景交给视频层，这里只保留透明底色兜底 */
+body {
+  background-color: var(--bg);
+}
+
+/* ============================================================
+   视频背景较亮时，分类标题需要加深保证可读性
+   ============================================================ */
+.cat-title {
+  color: #ffffff;
+  text-shadow:
+    0 1px 3px rgba(0,0,0,0.9),
+    0 0 8px rgba(0,0,0,0.6);
+}
+.cat-title .count {
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+/* ============================================================
+   视频背景较亮时，分类筛选按钮也需要加深保证可读性
+   ============================================================ */
+.chip {
+  background: rgba(10, 13, 18, 0.55) !important;
+  backdrop-filter: blur(4px);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+.chip:not(.active) {
+  color: #ffffff !important;
+}
+
+/* 去掉分类标题后面的横线 */
+.cat-title::after {
+  display: none;
+}
+
+/* 顶栏改为更透明，让视频背景透出来，减少黑边突兀感 */
+.topbar {
+  background: rgba(10, 13, 18, 0.28) !important;
+  backdrop-filter: blur(6px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(6px) saturate(140%) !important;
+  border-bottom: none !important;
+}
+
+/* 视频背景较亮时，顶栏右侧“正通过...访问”这行文字加深保证可读性 */
+.access {
+  color: #ffffff !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.5);
+}
+.access b {
+  color: #ffffff !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.5);
+}
+.access .host {
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.5);
+}
+
+/* IP地址部分改成绿色终端风格 */
+.access .host {
+  color: #3ee08a !important;
+  text-shadow: 0 0 6px rgba(62, 224, 138, 0.6), 0 1px 3px rgba(0,0,0,0.7) !important;
 }

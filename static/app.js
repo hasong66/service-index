@@ -16,6 +16,8 @@
     view: null,     // 当前“视角”网络（卡片主点击使用）
     filter: "all",
     query: "",
+    health: {},
+    background: { type: "video", src: "bg.mp4" },
   };
 
   // ---------- 工具 ----------
@@ -116,6 +118,44 @@
   function avatarStyle(seed) {
     const h = hue(seed);
     return `background:hsl(${h} 42% 17%);color:hsl(${h} 72% 68%)`;
+  }
+
+  // ---------- 背景渲染 ----------
+  function renderBackground() {
+    const root = $("#bg-root");
+    if (!root) return;
+    const bg = STATE.background || { type: "video", src: "bg.mp4" };
+    const url = "/static/" + bg.src;
+    root.innerHTML = bg.type === "image"
+      ? `<img class="bg-video" src="${escapeHtml(url)}" alt="">`
+      : `<video class="bg-video" autoplay muted loop playsinline>
+           <source src="${escapeHtml(url)}" type="video/mp4">
+         </video>`;
+  }
+
+  async function uploadBackground(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch("/api/background", { method: "POST", body: fd });
+      if (res.status === 401) { location.href = "/login"; return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "上传失败");
+      applyConfig(data);
+      toast("背景已更新", "ok");
+    } catch (e) {
+      toast(e.message || "上传失败", "err");
+    }
+  }
+
+  async function resetBackground() {
+    try {
+      const data = await api("POST", "/api/background/reset");
+      applyConfig(data);
+      toast("已恢复默认背景", "ok");
+    } catch (e) {
+      toast(e.message, "err");
+    }
   }
 
   // ============================================================
@@ -253,6 +293,7 @@
       .join("");
 
     return `<div class="card${reachable ? "" : " off"}" style="--i:${idx}" data-id="${escapeHtml(svc.id)}">
+              <span class="status-dot unknown" data-role="status" title="状态检测中…"></span>
               ${main}
               <div class="card-nets">${pills}</div>
               <div class="card-tools">
@@ -498,9 +539,11 @@
     STATE.services = data.services || [];
     STATE.detected = data.detected;
     STATE.host = data.host;
+    STATE.background = data.background || STATE.background;
 
     document.title = STATE.title;
     $("#app-title").textContent = STATE.title;
+    renderBackground();
 
     if (data.needs_networks) {
       startWizard(data);
@@ -512,6 +555,7 @@
     STATE.detected = clientDetected || data.detected;
     if (!STATE.view || !netById(STATE.view)) STATE.view = STATE.detected;
     render();
+    refreshHealth();
   }
 
   // ============================================================
@@ -528,6 +572,18 @@
       location.href = "/login";
     });
     $("#btn-discover").addEventListener("click", openDiscover);
+    $("#btn-bg").title = "自定义背景（右键恢复默认视频）";
+    $("#btn-bg").addEventListener("click", () => $("#bg-file-input").click());
+    $("#btn-bg").addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (confirm("恢复成默认视频背景？")) resetBackground();
+    });
+    $("#bg-file-input").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      await uploadBackground(file);
+      e.target.value = "";
+    });
     $("#btn-settings").addEventListener("click", () => {
       $("#pw-cur").value = $("#pw-new").value = $("#pw-new2").value = "";
       hideErr("#pw-err");
@@ -540,6 +596,7 @@
       if (!b) return;
       STATE.view = b.dataset.net;
       render();
+      refreshHealth();
     });
     $("#chips").addEventListener("click", (e) => {
       const b = e.target.closest("[data-chip]");
@@ -863,6 +920,34 @@
     if (ok) toast(`已添加 ${ok} 个服务`, "ok");
   }
 
+  // ============================================================
+  //  服务健康状态（运行 / 离线）
+  // ============================================================
+  function updateHealthDots() {
+    $$(".card").forEach((card) => {
+      const dot = card.querySelector('[data-role="status"]');
+      if (!dot) return;
+      const st = STATE.health[card.dataset.id] || "unknown";
+      dot.className = "status-dot " + st;
+      dot.title = st === "up" ? "运行中" : st === "down" ? "已离线" : "状态未知";
+    });
+  }
+
+  function applyHealth(map) {
+    STATE.health = map || {};
+    updateHealthDots();
+  }
+
+  async function refreshHealth() {
+    if (!STATE.view) return;
+    try {
+      const data = await api("GET", "/api/health?network=" + encodeURIComponent(STATE.view));
+      applyHealth(data);
+    } catch (e) {
+      // 静默失败，不打扰用户，下一轮轮询再试
+    }
+  }
+
   // ---------- 启动 ----------
   async function init() {
     bind();
@@ -875,4 +960,5 @@
   }
 
   init();
+  setInterval(refreshHealth, 20000);
 })();
